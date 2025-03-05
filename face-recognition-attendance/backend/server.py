@@ -58,7 +58,7 @@ def handle_options():
 
 # JWT and Bcrypt configuration
 app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY')
-app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(days=30)  # Extended to 30 days
+app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(days=30)  #30days validity of the login
 jwt = JWTManager(app)
 bcrypt = Bcrypt(app)
 
@@ -332,16 +332,19 @@ def recognize():
         face_locations = face_recognition.face_locations(rgb_array)
         face_encodings = face_recognition.face_encodings(rgb_array, face_locations)
         
+        # Consolidated error handling
         if not face_encodings:
             logger.error("No face detected in image")
-            return jsonify({"error": "No face detected in image"}), 400
-        
-        logger.info(f"Registered students found for this user: {len(registered_students)}")
+            return jsonify({
+                "error": "No face detected. Please ensure your face is clearly visible.",
+                "status": "face_detection_failed"
+            }), 400
         
         if not registered_students:
             logger.error("No registered students found for this user")
             return jsonify({
-                "error": "No registered students found. Please register students first.",
+                "error": "No students registered. Please add students first.",
+                "status": "no_students_registered",
                 "user_id": str(current_user_id)
             }), 404
         
@@ -360,17 +363,17 @@ def recognize():
                 known_face_roll_numbers.append(student['roll_number'])
                 known_face_student_ids.append(student['_id'])
         
-        logger.info(f"Validated known face encodings: {len(known_face_encodings)}")
-        
         # If no valid face encodings found
         if not known_face_encodings:
             logger.error("No valid face encodings found for this user")
             return jsonify({
-                "error": "No valid student face encodings. Please re-register students.",
+                "error": "No student faces registered. Please register student faces.",
+                "status": "no_face_encodings",
                 "user_id": str(current_user_id)
             }), 404
         
         # Recognize faces with strict matching
+        recognized_students = []
         for face_encoding in face_encodings:
             best_match = None
             best_confidence = 0
@@ -385,77 +388,69 @@ def recognize():
                 if confidence > 0.5 and confidence > best_confidence:
                     best_match = idx
                     best_confidence = confidence
-                # If NO match found for ANY face encoding
+            
+            # If NO match found for ANY face encoding
             if best_match is None:
                 logger.warning("No matching student found for the face")
                 return jsonify({
-                    "status": "error",
-                    "message": "This face is not registered in your account. Please register the student first.",
+                    "error": "Face not recognized. Please register this student.",
+                    "status": "face_not_recognized",
                     "details": {
-                        "registered_students_count": len(known_face_encodings),
-                        "best_confidence": float(best_confidence)
+                        "registered_students_count": len(known_face_encodings)
                     }
                 }), 404
-                
-                
             
-            # If a good match is found ONLY for this user's students
-            if best_match is not None:
-                name = known_face_names[best_match]
-                roll_number = known_face_roll_numbers[best_match]
-                student_id = known_face_student_ids[best_match]
-                
-                # ADDITIONAL VERIFICATION: Verify student belongs to current user
-                student = students_collection.find_one({
-                    '_id': student_id,
-                    'user_id': current_user_id
-                })
-                
-                if not student:
-                    logger.error(f"Attempted to recognize student not belonging to user {current_user_id}")
-                    continue
-                
-                # Get today's date
-                today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-                tomorrow = today + timedelta(days=1)
-                
-                # Check for existing attendance today
-                existing_attendance = attendance_collection.find_one({
+            # Store recognized student details
+            name = known_face_names[best_match]
+            roll_number = known_face_roll_numbers[best_match]
+            student_id = known_face_student_ids[best_match]
+            
+            # ADDITIONAL VERIFICATION: Verify student belongs to current user
+            student = students_collection.find_one({
+                '_id': student_id,
+                'user_id': current_user_id
+            })
+            
+            if not student:
+                logger.error(f"Attempted to recognize student not belonging to user {current_user_id}")
+                continue
+            
+            # Get today's date
+            today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            tomorrow = today + timedelta(days=1)
+            
+            # Check for existing attendance today
+            existing_attendance = attendance_collection.find_one({
+                'user_id': current_user_id,  # STRICT user_id filter
+                'student_id': student_id,
+                'timestamp': {
+                    '$gte': today,
+                    '$lt': tomorrow
+                }
+            })
+            
+            # If attendance not already marked
+            if not existing_attendance:
+                # Mark attendance
+                attendance_record = {
                     'user_id': current_user_id,  # STRICT user_id filter
                     'student_id': student_id,
-                    'timestamp': {
-                        '$gte': today,
-                        '$lt': tomorrow
-                    }
-                })
-                
-                # If attendance not already marked
-                if not existing_attendance:
-                    # Mark attendance
-                    attendance_record = {
-                        'user_id': current_user_id,  # STRICT user_id filter
-                        'student_id': student_id,
-                        'name': name,
-                        'roll_number': roll_number,
-                        'timestamp': datetime.now()
-                    }
-                    attendance_collection.insert_one(attendance_record)
-                
-                logger.info(f"Recognized student: {name}, Roll: {roll_number}")
-                
-                return jsonify({
-                    "name": name,
-                    "roll_number": roll_number,
-                    "confidence": float(best_confidence),
-                    "status": "Attendance marked" if not existing_attendance else "Already marked"
-                }), 200
+                    'name': name,
+                    'roll_number': roll_number,
+                    'timestamp': datetime.now()
+                }
+                attendance_collection.insert_one(attendance_record)
+            
+            # Store recognized student details
+            recognized_students.append({
+                "name": name,
+                "roll_number": roll_number,
+                "confidence": float(best_confidence),
+                "status": "Attendance marked" if not existing_attendance else "Already marked"
+            })
         
-        # If no match found
-        logger.warning("No matching student found")
-        return jsonify({
-            "name": "UNKNOWN",
-            "status": "not recognized"
-        }), 404
+        # Return all recognized students
+        return jsonify(recognized_students), 200
     
     except Exception as e:
         logger.error(f"Full Recognition Error: {str(e)}")
@@ -467,7 +462,8 @@ def recognize():
             "details": str(e),
             "user_id": str(current_user_id) if 'current_user_id' in locals() else 'Unknown'
         }), 500
-# Modify download and clear attendance routes similarly
+
+
 @app.route('/download', methods=['GET'])
 @jwt_required()
 def download_csv():
@@ -513,7 +509,7 @@ def download_csv():
         output.seek(0)
         
         # Generate filename with date range
-        filename = f"Attendance_{start_date.strftime('%Y-%m-%d')}_{end_date.strftime('%Y-%m-%d')}.csv"
+        filename = f"Attendance_{start_date.strftime('%d-%m-%Y')}.csv"
         
         return send_file(
             io.BytesIO(output.getvalue().encode('utf-8')), 
@@ -632,6 +628,8 @@ def home():
             "/register - Register new faces",
             "/download - Download attendance CSV",
             "/clear_attendance - Clear attendance records"
+            "/delete_attendance - Delete attendance record"
+            
         ]
     })
 

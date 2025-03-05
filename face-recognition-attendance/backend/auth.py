@@ -105,7 +105,7 @@ def login():
     user = users_collection.find_one({"email": email})
     
     if not user:
-        return jsonify({"error": "Invalid credentials"}), 401
+        return jsonify({"error": f"Email {email} is not registered. Please register first."}), 401
     
     # Check password
     if not bcrypt.check_password_hash(user['password'], password):
@@ -132,7 +132,6 @@ def login():
         "user_email": user['email']
     }), 200
 
-# Optional: Add a route to get user profile
 @auth_bp.route('/profile', methods=['GET'])
 @jwt_required()
 def get_profile():
