@@ -26,6 +26,22 @@ An intelligent attendance management system that leverages advanced face recogni
 - pip
 - npm
 
+### Frontend Setup
+```bash
+# Navigate to frontend directory
+cd ../frontend
+
+# Install dependencies
+npm install
+
+# Create environment file
+cp .env.example .env
+# Edit .env with your backend URL
+
+# Start the React development server
+npm start
+```
+
 ### Backend Setup
 ```bash
 # Clone the repository
@@ -49,29 +65,15 @@ cp .env.example .env
 python app.py
 ```
 
-###Frontend Setup
-```bash
-# Navigate to frontend directory
-cd ../frontend
 
-# Install dependencies
-npm install
+## 🔐 Environment Configuration
+- Create .env files in both backend and frontend directories
+- Use .env.example as a template
 
-# Create environment file
-cp .env.example .env
-# Edit .env with your backend URL
-
-# Start the React development server
-npm start
-```
-🔐 Environment Configuration
-Create .env files in both backend and frontend directories
-Use .env.example as a template
-Never commit sensitive information to version control
-📦 Key Dependencies
-Flask
-React
-OpenCV
-face-recognition
-pymongo
-jwt-extended
+## 📦 Key Dependencies
+- Flask
+- React
+- OpenCV
+- face-recognition
+- pymongo
+- jwt-extended
